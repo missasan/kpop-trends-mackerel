@@ -1,0 +1,33 @@
+name: Fetch KPOP metrics
+
+on:
+  # 毎時0分（UTC）に実行される
+  schedule:
+    - cron: "0 * * * *"
+  # 手動実行もできるようにする
+  workflow_dispatch:
+
+jobs:
+  fetch-kpop-metrics:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run script
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          MACKEREL_API_KEY: ${{ secrets.MACKEREL_API_KEY }}
+        run: |
+          python fetch_youtube_latest_mv.py
