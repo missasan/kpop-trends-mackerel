@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import isodate
 import time
 from typing import Optional
 
@@ -189,6 +190,32 @@ def filter_mv_items(items, group_name: str):
     return None
 
 
+def get_video_duration(video_id: str):
+    """動画の duration（PT3M12S など）を取得する"""
+    api_key = get_youtube_api_key()
+    params = {
+        "key": api_key,
+        "part": "contentDetails",
+        "id": video_id,
+    }
+    resp = requests.get(YOUTUBE_VIDEOS_URL, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    items = data.get("items", [])
+    if not items:
+        return None
+    return items[0]["contentDetails"]["duration"]
+
+
+def is_shorts(duration: str) -> bool:
+    """60秒未満は Shorts と判定する"""
+    try:
+        td = isodate.parse_duration(duration)
+        return td.total_seconds() < 60
+    except Exception:
+        return False
+
+
 def search_latest_mv(channel_id: str, group_name: str):
     """
     指定したチャンネル内で、タイトルに
@@ -196,8 +223,8 @@ def search_latest_mv(channel_id: str, group_name: str):
       - 'MV'
     が含まれる動画のみをフィルタし、
     新しい順に見て最初にヒットしたものを返す。
-    
-    返す dict: { "video_id": str, "title": str }
+
+    さらに Shorts（60秒未満）は除外する。
     """
     api_key = get_youtube_api_key()
 
@@ -206,9 +233,9 @@ def search_latest_mv(channel_id: str, group_name: str):
         "key": api_key,
         "part": "snippet",
         "channelId": channel_id,
-        "q": group_name,      # グループ名で検索
+        "q": group_name,
         "type": "video",
-        "order": "date",      # 新しい順
+        "order": "date",
         "maxResults": 50,
     }
 
@@ -220,11 +247,35 @@ def search_latest_mv(channel_id: str, group_name: str):
     if not items:
         return None
 
+    # グループ名・MV を含む候補をまず絞る
     mv = filter_mv_items(items, group_name)
-    if mv:
-        return mv
+    if not mv:
+        return None
 
-    return None
+    # ここで Shorts 判定を入れる（duration < 60秒 → 除外）
+    video_id = mv["video_id"]
+    duration = get_video_duration(video_id)
+
+    if duration and is_shorts(duration):
+        # Shorts の場合は次点を探す
+        group_lower = group_name.lower().replace(" ", "")
+
+        for item in items[1:]:  # 1件目以外から再探索
+            title = item["snippet"]["title"]
+            title_lower = title.lower()
+            title_compact = title_lower.replace(" ", "")
+            if group_lower in title_compact and "mv" in title_lower:
+                vid = item["id"]["videoId"]
+                d2 = get_video_duration(vid)
+                if d2 and not is_shorts(d2):
+                    return {
+                        "video_id": vid,
+                        "title": title,
+                    }
+        return None
+
+    # Shorts でない → 本物のMVとして返す
+    return mv
 
 
 def get_video_stats(video_id: str):
