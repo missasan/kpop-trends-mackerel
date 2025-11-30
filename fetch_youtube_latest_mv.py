@@ -11,6 +11,34 @@ MACKEREL_API_KEY_ENV = "MACKEREL_API_KEY"
 MACKEREL_BASE_URL = "https://api.mackerelio.com/api/v0"
 SERVICE_NAME = "kpop-trends"
 
+GROUPS = [
+    {
+        "id": "ive",
+        "name": "IVE",
+        "channel_id": "UCYDmx2Sfpnaxg488yBpZIGg",
+    },
+    {
+        "id": "aespa",
+        "name": "aespa",
+        "channel_id": "UCEf_Bc-KVd7onSeifS3py9g",
+    },
+    {
+        "id": "taeyeon_panorama",
+        "name": "TAEYEON Panorama",
+        "channel_id": "UCEf_Bc-KVd7onSeifS3py9g",
+    },
+    {
+        "id": "le_sserafim",
+        "name": "LE SSERAFIM",
+        "channel_id": "UC3IZKseVpdzPSBaWxBxundA",
+    },
+    {
+        "id": "illit",
+        "name": "ILLIT",
+        "channel_id": "UC3IZKseVpdzPSBaWxBxundA",
+    },
+]
+
 
 def get_api_key() -> str:
     """環境変数から API キーを取得する"""
@@ -26,8 +54,6 @@ def get_mackerel_api_key() -> str:
         raise RuntimeError(f"環境変数 {MACKEREL_API_KEY_ENV} が設定されていません。")
     return api_key
 
-
-from typing import Optional  # ← 追加してください
 
 def post_service_metric(metric_name: str, value: float, timestamp: Optional[int] = None):
     """
@@ -56,6 +82,57 @@ def post_service_metric(metric_name: str, value: float, timestamp: Optional[int]
 
     resp = requests.post(url, headers=headers, json=payload, timeout=10)
     resp.raise_for_status()
+
+
+def filter_mv_items(items, group_name: str):
+    """
+    正式MV（末尾が MV）かつ、Remix / Performance などの派生版を除外する。
+    """
+    group_key = group_name.lower().replace(" ", "")
+
+    # 除外すべきキーワード一覧（小文字）
+    exclude_keywords = [
+        "remix",
+        "performance",
+        "perf.",
+        "dance",
+        "choreo",
+        "practice",
+        "teaser",
+        "highlight",
+        "lyric",
+        "reaction",
+        "track video",
+    ]
+
+    for item in items:
+        title = item["snippet"]["title"]
+        title_lower = title.lower()
+        title_compact = title_lower.replace(" ", "")
+
+        # グループ名（スペースなし）がタイトルに含まれること
+        if group_key not in title_compact:
+            continue
+
+        # 除外キーワードに該当したらスキップ
+        if any(kw in title_lower for kw in exclude_keywords):
+            continue
+
+        # タイトル末尾が "MV"（公式MV）かどうか
+        title_end = title_lower.strip()
+        if not (
+            title_end.endswith("mv")
+            or title_end.endswith("mv)")
+            or title_end.endswith("mv]")
+            or title_end.endswith("official mv")
+        ):
+            continue
+
+        # ここまで通れば、これは“公式MV”
+        video_id = item["id"]["videoId"]
+        return {"video_id": video_id, "title": title}
+
+    return None
 
 
 def search_latest_mv(channel_id: str, group_name: str):
@@ -89,21 +166,10 @@ def search_latest_mv(channel_id: str, group_name: str):
     if not items:
         return None
 
-    # Python 側でタイトルフィルタ
-    group_lower = group_name.lower().replace(" ", "")
-    for item in items:
-        title = item["snippet"]["title"]
-        title_lower = title.lower()
-        title_compact = title_lower.replace(" ", "")
+    mv = filter_mv_items(items, group_name)
+    if mv:
+        return mv
 
-        if group_lower in title_compact and "mv" in title_lower:
-            video_id = item["id"]["videoId"]
-            return {
-                "video_id": video_id,
-                "title": title,
-            }
-
-    # 見つからなかった場合
     return None
 
 
@@ -137,43 +203,47 @@ def get_video_stats(video_id: str):
 
 
 def main():
-    # ★必ずあなたの IVE 用の channelId に書き換えてください
-    # 例: "UCxxxxxxx..."
-    channel_id = "UCYDmx2Sfpnaxg488yBpZIGg"
-    
-    group_name = "IVE"
+    for g in GROUPS:
+        group_id = g["id"]
+        group_name = g["name"]
+        channel_id = g["channel_id"]
 
-    latest = search_latest_mv(channel_id, group_name)
-    if latest is None:
-        print("MV らしき動画が見つかりませんでした。")
-        return
+        print("=" * 60)
+        print(f"[{group_id}] グループ: {group_name}")
 
-    video_id = latest["video_id"]
-    title = latest["title"]
-    url = f"https://www.youtube.com/watch?v={video_id}"
+        latest = search_latest_mv(channel_id, group_name)
+        if latest is None:
+            print(f"[{group_id}] MV らしき動画が見つかりませんでした。")
+            continue
 
-    print("最新MV候補:")
-    print("  title   :", title)
-    print("  videoId :", video_id)
-    print("  URL     :", url)
+        video_id = latest["video_id"]
+        title = latest["title"]
+        url = f"https://www.youtube.com/watch?v={video_id}"
 
-    stats = get_video_stats(video_id)
-    if not stats:
-        print("統計情報の取得に失敗しました。")
-        return
+        print(f"[{group_id}] 最新MV候補:")
+        print("  title   :", title)
+        print("  videoId :", video_id)
+        print("  URL     :", url)
 
-    print()
-    print("統計情報:")
-    print("  viewCount :", stats["viewCount"])
+        stats = get_video_stats(video_id)
+        if not stats:
+            print(f"[{group_id}] 統計情報の取得に失敗しました。")
+            continue
 
-    # ▼ メトリック名を動画ごとにユニークにする
-    metric_name = f"kpop.youtube.viewcount.ive_{video_id}"
-    value = stats["viewCount"]
+        view_count = stats["viewCount"]
 
-    print()
-    print(f"Mackerel にメトリックを投稿します... ({metric_name})")
-    post_service_metric(metric_name, value)
-    print("投稿完了")
+        print(f"[{group_id}] 統計情報:")
+        print("  viewCount :", view_count)
+
+        # メトリック名: グループID＋videoId でユニークにする
+        metric_name = f"kpop.youtube.viewcount.{group_id}_{video_id}"
+
+        print(f"[{group_id}] Mackerel にメトリックを投稿します... ({metric_name})")
+        post_service_metric(metric_name, view_count)
+        print(f"[{group_id}] 投稿完了")
+
+    print("=" * 60)
+    print("全グループ処理が完了しました。")
 
 if __name__ == "__main__":
     main()
