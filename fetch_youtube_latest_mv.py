@@ -1,7 +1,9 @@
 import os
+import json
 import requests
 import time
 from typing import Optional
+
 
 YOUTUBE_API_KEY_ENV = "YOUTUBE_API_KEY"
 YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
@@ -39,8 +41,21 @@ GROUPS = [
     },
 ]
 
+STATE_FILE = "state.json"
 
-def get_api_key() -> str:
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def get_youtube_api_key() -> str:
     """環境変数から API キーを取得する"""
     api_key = os.getenv(YOUTUBE_API_KEY_ENV)
     if not api_key:
@@ -53,6 +68,45 @@ def get_mackerel_api_key() -> str:
     if not api_key:
         raise RuntimeError(f"環境変数 {MACKEREL_API_KEY_ENV} が設定されていません。")
     return api_key
+
+
+def calc_view_delta(state, group_id, video_id, current_view):
+    """
+    前回実行時との差分を返す。
+    state の構造（例）:
+    {
+        "ive": {
+            "video_id": "abc123",
+            "last_view": 123456
+        },
+        "aespa": {
+            "video_id": "def456",
+            "last_view": 98765
+        }
+    }
+    """
+
+    prev_entry = state.get(group_id)
+    
+    # defaults
+    delta = 0
+
+    if prev_entry and prev_entry.get("video_id") == video_id:
+        prev_view = prev_entry.get("last_view", 0)
+        raw_delta = current_view - prev_view
+        if raw_delta > 0:
+            delta = raw_delta
+    else:
+        # MV が切り替わった or 初回 → 差分は0で開始
+        delta = 0
+
+    # state を更新
+    state[group_id] = {
+        "video_id": video_id,
+        "last_view": current_view
+    }
+
+    return delta
 
 
 def post_service_metric(metric_name: str, value: float, timestamp: Optional[int] = None):
@@ -145,7 +199,7 @@ def search_latest_mv(channel_id: str, group_name: str):
     
     返す dict: { "video_id": str, "title": str }
     """
-    api_key = get_api_key()
+    api_key = get_youtube_api_key()
 
     # まずは「group_name を含む動画」を新しい順で最大50件取得
     params = {
@@ -177,7 +231,7 @@ def get_video_stats(video_id: str):
     """
     videoId から viewCount などの統計情報を取得する。
     """
-    api_key = get_api_key()
+    api_key = get_youtube_api_key()
 
     params = {
         "key": api_key,
@@ -203,6 +257,9 @@ def get_video_stats(video_id: str):
 
 
 def main():
+    # ここで前回のstate.jsonを読み込む
+    state = load_state()
+
     for g in GROUPS:
         group_id = g["id"]
         group_name = g["name"]
@@ -231,16 +288,21 @@ def main():
             continue
 
         view_count = stats["viewCount"]
+        print(f"[{group_id}] viewCount:", view_count)
 
-        print(f"[{group_id}] 統計情報:")
-        print("  viewCount :", view_count)
+        # 絶対値メトリック
+        metric_abs = f"kpop.youtube.viewcount.{group_id}_{video_id}"
+        post_service_metric(metric_abs, view_count)
+        print(f"[{group_id}] 絶対値メトリック投稿完了 ({metric_abs})")
 
-        # メトリック名: グループID＋videoId でユニークにする
-        metric_name = f"kpop.youtube.viewcount.{group_id}_{video_id}"
+        # 差分メトリック
+        delta = calc_view_delta(state, group_id, video_id, view_count)
+        metric_delta = f"kpop.youtube.viewdelta.{group_id}_{video_id}"
+        post_service_metric(metric_delta, delta)
+        print(f"[{group_id}] 差分メトリック投稿完了 ({metric_delta}): {delta}")
 
-        print(f"[{group_id}] Mackerel にメトリックを投稿します... ({metric_name})")
-        post_service_metric(metric_name, view_count)
-        print(f"[{group_id}] 投稿完了")
+    # ここで state.json を保存
+    save_state(state)
 
     print("=" * 60)
     print("全グループ処理が完了しました。")

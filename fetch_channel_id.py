@@ -26,7 +26,7 @@ def get_channel_id_by_handle(handle: str):
 
 
 def main():
-    handle = "@STARSHIP_official"
+    handle = "@HYBELABELS"
     channel_id = get_channel_id_by_handle(handle)
 
     if channel_id:
