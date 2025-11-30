@@ -1,10 +1,11 @@
 name: Fetch KPOP metrics
 
+permissions:
+  contents: write
+
 on:
-  # 毎時0分（UTC）に実行される
   schedule:
     - cron: "0 * * * *"
-  # 手動実行もできるようにする
   workflow_dispatch:
 
 jobs:
@@ -14,6 +15,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,4 +44,3 @@ jobs:
           git commit -m "Update state.json" || echo "No changes to commit"
           git pull --rebase origin "${GITHUB_REF#refs/heads/}" || echo "No changes to pull"
           git push origin HEAD:"${GITHUB_REF#refs/heads/}"
-
