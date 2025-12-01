@@ -200,8 +200,6 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 
-# Local state for YouTube metrics
-state.json
 .cursorindexingignore
 
 # Marimo

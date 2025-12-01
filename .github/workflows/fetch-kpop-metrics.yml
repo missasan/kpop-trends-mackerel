@@ -5,7 +5,7 @@ permissions:
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -29,12 +29,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests isodate
 
-      - name: Restore state cache
-        uses: actions/cache@v4
-        with:
-          path: state.json
-          key: state-json-${{ github.ref_name }}
-
       - name: Run script
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -42,9 +36,11 @@ jobs:
         run: |
           python fetch_youtube_latest_mv.py
 
-      - name: Save state cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: state.json
-          key: state-json-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Commit updated state.json
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add state.json
+          git commit -m "Update state.json" || echo "No changes to commit"
+          git pull --rebase origin "${GITHUB_REF#refs/heads/}" || echo "No changes to pull"
+          git push origin HEAD:"${GITHUB_REF#refs/heads/}"
