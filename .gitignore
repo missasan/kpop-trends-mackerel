@@ -199,6 +199,9 @@ cython_debug/
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
+
+# Local state for YouTube metrics
+state.json
 .cursorindexingignore
 
 # Marimo
