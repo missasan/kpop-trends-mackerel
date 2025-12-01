@@ -28,7 +28,7 @@ GROUPS = [
     },
     {
         "id": "taeyeon_panorama",
-        "name": "TAEYEON Panorama",
+        "name": "TAEYEON",
         "channel_id": "UCEf_Bc-KVd7onSeifS3py9g",
     },
     {
