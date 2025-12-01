@@ -251,7 +251,38 @@ def search_latest_mv(channel_id: str, group_name: str):
     }
 
     resp = requests.get(YOUTUBE_SEARCH_URL, params=params, timeout=10)
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError:
+        reason = None
+        message = None
+        body = resp.text
+        try:
+            data_err = resp.json()
+            error_info = data_err.get("error", {})
+            errors = error_info.get("errors", [])
+            if errors:
+                reason = errors[0].get("reason")
+            message = error_info.get("message")
+            body = data_err
+        except Exception:
+            pass
+
+        print(
+            f"[ERROR] YouTube search.list failed (status={resp.status_code}, reason={reason}, message={message}, body={body})"
+        )
+
+        quota_reasons = {
+            "quotaExceeded",
+            "dailyLimitExceeded",
+            "dailyLimitExceededUnreg",
+            "userRateLimitExceeded",
+        }
+        if reason in quota_reasons:
+            return {"quota_exceeded": True}
+
+        return None
+
     data = resp.json()
 
     items = data.get("items", [])
@@ -378,6 +409,9 @@ def main():
 
         if should_search:
             latest = search_latest_mv(channel_id, group_name)
+            if isinstance(latest, dict) and latest.get("quota_exceeded"):
+                print(f"[{group_id}] YouTube API のクォータに到達したため、残りのグループ処理を中断します。")
+                break
             if latest is None:
                 print(f"[{group_id}] MV らしき動画が見つかりませんでした。キャッシュがあればそれを使います。")
 
