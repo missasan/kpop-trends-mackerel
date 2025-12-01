@@ -28,8 +28,10 @@ GROUPS = [
     },
     {
         "id": "taeyeon_panorama",
-        "name": "TAEYEON 태연 '인사 (Panorama)'",
+        "name": "TAEYEON Panorama",
         "channel_id": "UCEf_Bc-KVd7onSeifS3py9g",
+        # タイトル判定に使うキーワード（スペース除去、小文字化して判定）
+        "keywords": ["taeyeon", "panorama", "태연", "인사"],
     },
     {
         "id": "le_sserafim",
@@ -150,11 +152,14 @@ def post_service_metric(metric_name: str, value: float, timestamp: Optional[int]
     resp.raise_for_status()
 
 
-def filter_mv_items(items, group_name: str):
+def filter_mv_items(items, group_name: str, extra_keywords=None):
     """
     正式MV（末尾が MV）かつ、Remix / Performance などの派生版を除外する。
     """
     group_key = group_name.lower().replace(" ", "")
+    include_keys = [group_key]
+    if extra_keywords:
+        include_keys.extend([k.lower().replace(" ", "") for k in extra_keywords])
 
     # 除外すべきキーワード一覧（小文字）
     exclude_keywords = [
@@ -176,8 +181,8 @@ def filter_mv_items(items, group_name: str):
         title_lower = title.lower()
         title_compact = title_lower.replace(" ", "")
 
-        # グループ名（スペースなし）がタイトルに含まれること
-        if group_key not in title_compact:
+        # グループ名（スペースなし）か追加キーワードのいずれかがタイトルに含まれること
+        if not any(k in title_compact for k in include_keys):
             continue
 
         # 除外キーワードに該当したらスキップ
@@ -227,7 +232,7 @@ def is_shorts(duration: str) -> bool:
         return False
 
 
-def search_latest_mv(channel_id: str, group_name: str):
+def search_latest_mv(channel_id: str, group_name: str, extra_keywords=None):
     """
     指定したチャンネル内で、タイトルに
       - グループ名（スペース無視）
@@ -290,7 +295,7 @@ def search_latest_mv(channel_id: str, group_name: str):
         return None
 
     # グループ名・MV を含む候補をまず絞る
-    mv = filter_mv_items(items, group_name)
+    mv = filter_mv_items(items, group_name, extra_keywords=extra_keywords)
     if not mv:
         return None
 
@@ -306,7 +311,7 @@ def search_latest_mv(channel_id: str, group_name: str):
             title = item["snippet"]["title"]
             title_lower = title.lower()
             title_compact = title_lower.replace(" ", "")
-            if group_lower in title_compact and "mv" in title_lower:
+            if (group_lower in title_compact or (extra_keywords and any(k in title_compact for k in extra_keywords))) and "mv" in title_lower:
                 vid = item["id"]["videoId"]
                 d2 = get_video_duration(vid)
                 if d2 and not is_shorts(d2):
@@ -408,7 +413,7 @@ def main():
         cached_entry = state.get(group_id)
 
         if should_search:
-            latest = search_latest_mv(channel_id, group_name)
+            latest = search_latest_mv(channel_id, group_name, extra_keywords=g.get("keywords"))
             if isinstance(latest, dict) and latest.get("quota_exceeded"):
                 print(f"[{group_id}] YouTube API のクォータに到達したため、残りのグループ処理を中断します。")
                 break
