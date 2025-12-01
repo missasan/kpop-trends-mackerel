@@ -28,7 +28,7 @@ GROUPS = [
     },
     {
         "id": "taeyeon_panorama",
-        "name": "TAEYEON",
+        "name": "TAEYEON 태연 '인사 (Panorama)'",
         "channel_id": "UCEf_Bc-KVd7onSeifS3py9g",
     },
     {
