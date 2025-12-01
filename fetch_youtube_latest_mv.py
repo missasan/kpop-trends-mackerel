@@ -3,6 +3,7 @@ import json
 import requests
 import isodate
 import time
+from datetime import datetime, timedelta
 from typing import Optional
 
 
@@ -43,6 +44,9 @@ GROUPS = [
 ]
 
 STATE_FILE = "state.json"
+JST_OFFSET = timedelta(hours=9)
+# YouTube 検索を実行する時刻（JST）
+SEARCH_HOURS_JST = {14, 19}
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -71,7 +75,7 @@ def get_mackerel_api_key() -> str:
     return api_key
 
 
-def calc_view_delta(state, group_id, video_id, current_view):
+def calc_view_delta(state, group_id, video_id, current_view, title=None):
     """
     前回実行時との差分を返す。
     state の構造（例）:
@@ -82,7 +86,8 @@ def calc_view_delta(state, group_id, video_id, current_view):
         },
         "aespa": {
             "video_id": "def456",
-            "last_view": 98765
+            "last_view": 98765,
+            "title": "some title"
         }
     }
     """
@@ -102,10 +107,16 @@ def calc_view_delta(state, group_id, video_id, current_view):
         delta = 0
 
     # state を更新
-    state[group_id] = {
+    updated_entry = {
         "video_id": video_id,
         "last_view": current_view
     }
+    if title:
+        updated_entry["title"] = title
+    elif prev_entry and prev_entry.get("title"):
+        updated_entry["title"] = prev_entry["title"]
+
+    state[group_id] = updated_entry
 
     return delta
 
@@ -286,7 +297,7 @@ def get_video_stats(video_id: str):
 
     params = {
         "key": api_key,
-        "part": "statistics",
+        "part": "statistics,snippet",
         "id": video_id,
     }
 
@@ -300,14 +311,25 @@ def get_video_stats(video_id: str):
 
     stats = items[0]["statistics"]
     view_count = int(stats.get("viewCount", 0))
+    snippet = items[0].get("snippet", {})
 
     return {
         "viewCount": view_count,
+        "title": snippet.get("title"),
         "raw": stats,
     }
 
 
 def main():
+    # JST 現在時刻を取得
+    current_hour_jst = (datetime.utcnow() + JST_OFFSET).hour
+    should_search = current_hour_jst in SEARCH_HOURS_JST
+
+    if should_search:
+        print(f"JST {current_hour_jst}時台のため、YouTube検索を実行します。")
+    else:
+        print(f"JST {current_hour_jst}時台のため検索はスキップし、キャッシュ済みMVでメトリクスを送信します。")
+
     # ここで前回のstate.jsonを読み込む
     state = load_state()
 
@@ -319,13 +341,25 @@ def main():
         print("=" * 60)
         print(f"[{group_id}] グループ: {group_name}")
 
-        latest = search_latest_mv(channel_id, group_name)
-        if latest is None:
-            print(f"[{group_id}] MV らしき動画が見つかりませんでした。")
-            continue
+        latest = None
+        cached_entry = state.get(group_id)
 
-        video_id = latest["video_id"]
-        title = latest["title"]
+        if should_search:
+            latest = search_latest_mv(channel_id, group_name)
+            if latest is None:
+                print(f"[{group_id}] MV らしき動画が見つかりませんでした。キャッシュがあればそれを使います。")
+
+        if latest is None:
+            if not cached_entry:
+                print(f"[{group_id}] 検索を行わず、キャッシュも無いためスキップします。次の検索時間帯に更新されます。")
+                continue
+            video_id = cached_entry["video_id"]
+            title = cached_entry.get("title", "(タイトル不明)")
+            print(f"[{group_id}] キャッシュ済みのMVを使用します。")
+        else:
+            video_id = latest["video_id"]
+            title = latest["title"]
+
         url = f"https://www.youtube.com/watch?v={video_id}"
 
         print(f"[{group_id}] 最新MV候補:")
@@ -338,6 +372,10 @@ def main():
             print(f"[{group_id}] 統計情報の取得に失敗しました。")
             continue
 
+        # タイトルがキャッシュに無い場合、動画情報から補完する
+        if title == "(タイトル不明)" and stats.get("title"):
+            title = stats["title"]
+
         view_count = stats["viewCount"]
         print(f"[{group_id}] viewCount:", view_count)
 
@@ -347,7 +385,7 @@ def main():
         print(f"[{group_id}] 絶対値メトリック投稿完了 ({metric_abs})")
 
         # 差分メトリック
-        delta = calc_view_delta(state, group_id, video_id, view_count)
+        delta = calc_view_delta(state, group_id, video_id, view_count, title=title)
         metric_delta = f"kpop.youtube.viewdelta.{group_id}_{video_id}"
         post_service_metric(metric_delta, delta)
         print(f"[{group_id}] 差分メトリック投稿完了 ({metric_delta}): {delta}")
