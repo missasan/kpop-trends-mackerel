@@ -46,7 +46,7 @@ GROUPS = [
 STATE_FILE = "state.json"
 JST_OFFSET = timedelta(hours=9)
 # YouTube 検索を実行する時刻（JST）
-SEARCH_HOURS_JST = {14, 19}
+SEARCH_HOURS_JST = {13, 18}
 
 def load_state():
     if os.path.exists(STATE_FILE):
